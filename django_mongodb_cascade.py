@@ -4,81 +4,7 @@ from django.db.models import signals
 from django_mongodb_engine.query import A
 
 
-def get_model(cls, model_str):
-    if isinstance(model_str, basestring):
-        # Get the "app.Model" from the model string
-        try:
-            app_label, model_name = model_str.split(".")
-        except ValueError:
-            # If we can't split, assume the model is in the current app
-            app_label = cls._meta.app_label
-            model_name = model_str
-        model_cls = models.get_model(app_label, model_name)
-    elif isinstance(model_str, models.Model):
-        model_cls = model_str
-    else:
-        raise TypeError("'model' must be either a model class or a "
-                        "string model relation.")
-    return model_cls
-
-
-def build_save_signal_function(cls, field_name, model_str,
-                               pre_save_function, post_save_function):
-    """Build the function called by the post_save signal
-
-    This will update the given field in the given model with the
-    saved data.
-    """
-    def save_signal_function(sender, instance, created, *args, **kwargs):
-        model_cls = get_model(cls, model_str)
-        # If this is a newly created model, there won't be an embedded
-        # field that needs to be updated
-        if created:
-            return
-
-        if pre_save_function:
-            pre_save_function(sender, instance, created, *args, **kwargs)
-
-        # Can't use 'update()' on embedded models. It would be better
-        # to do that instead of iterating and saving individually.
-        filter_args = {field_name: A('id', instance.id)}
-        for obj in model_cls.objects.filter(**filter_args):
-            setattr(obj, field_name, instance)
-            obj.save()
-
-        if post_save_function:
-            post_save_function(sender, instance, created, *args, **kwargs)
-    return save_signal_function
-
-
-def build_delete_signal_function(cls, field_name, model_str,
-                                 pre_delete_function, post_delete_function):
-    """Build the function called by the post_delete signal
-
-    This will set the given field in the given model to 'None'
-    """
-    def delete_signal_function(sender, instance, *args, **kwargs):
-        model_cls = get_model(cls, model_str)
-
-        if pre_delete_function:
-            pre_delete_function(sender, instance, *args, **kwargs)
-
-        # Can't use 'update()' on embedded models. It would be better
-        # to do that instead of iterating and saving individually.
-        filter_args = {field_name: A('id', instance.id)}
-        for obj in model_cls.objects.filter(**filter_args):
-            setattr(obj, field_name, None)
-            obj.save()
-
-        if post_delete_function:
-            post_delete_function(sender, instance, *args, **kwargs)
-    return delete_signal_function
-
-
-def cascade_embedded(model, field_name, pre_save_function=None,
-                     post_save_function=None, override_save_function=None,
-                     pre_delete_function=None, post_delete_function=None,
-                     override_delete_function=None):
+class cascade_embedded(object):
     """Cascade saves and deletes to related models.
 
     When one model is embedded in another, it will not be updated if the
@@ -88,23 +14,69 @@ def cascade_embedded(model, field_name, pre_save_function=None,
     Example:
     >>>@cascade_embedded("account.Organization", "user_profile")
     >>>class UserProfile(models.Model)
+
+    Required Arguments:
+    :param target_model: The model that is embedding this model, and
+            that will be updated with the changes to this model's instances.
+    :param field_name: The name of the field that will contain the embedded
+            instance in the target model.
+
+    Options:
+    :param pre_save_function: A function to execute before each embedded
+            instance is saved in the target model
+    :param post_save_function: A function to execute after each embedded
+            instance is saved in the target model. This is attempted
+            regardless of any exceptions that are raised during saving.
+    :param override_save_function: This library creates a function that runs
+            during a "Post Save" Django signal. The user can override that
+            by providing a function here.
+            The user can also provide the value "None". In that case, no
+            post_save signal will be attached at all.
+
+    :param pre_delete_function:  A function to execute before each embedded
+            instance is deleted from the target model
+    :param post_delete_function: A function to execute after each embedded
+            instance is deleted in the target model. This is attempted
+            regardless of any exceptions that are raised during saving.
+    :param override_delete_function: This library creates a function that runs
+            during a "Post Delete" Django signal. The user can override that
+            by providing a function here.
+            The user can also provide the value "None". In that case, no
+            post_delete signal will be attached at all.
+
+    # TODO: Add support
+    :param watch_fields: A list of fields in the embedded model to watch
+            for changes. If this field is defined, the target model will only
+            be updated when one of the listed fields are changed. This only
+            applies to saving, since deletion deletes the whole instance.
     """
-    def wrapper(cls):
+    def __init__(self, target_model, field_name, **kwargs):
+        self.target_model = target_model
+        self.field_name = field_name
+        self.options = kwargs
+
+    def __call__(self, cls):
         # Prepare the post_save signal
-        if override_save_function:
+        override_save_function = self.options.get('override_save_function', -1)
+        if override_save_function != -1:
             save_signal_function = override_save_function
         else:
-            save_signal_function = build_save_signal_function(
-                                        cls, field_name, model,
-                                        pre_save_function, post_save_function)
+            save_signal_function = self.build_save_signal_function(
+                                        cls, self.field_name,
+                                        self.target_model,
+                                        self.options.get('pre_save_function'),
+                                        self.options.get('post_save_function'))
 
         # Prepare the post_delete signal
-        if override_delete_function:
+        override_delete_function = self.options.get('override_delete_function',
+                                                    -1)
+        if override_delete_function != -1:
             delete_signal_function = override_delete_function
         else:
-            delete_signal_function = build_delete_signal_function(
-                                    cls, field_name, model,
-                                    pre_delete_function, post_delete_function)
+            delete_signal_function = self.build_delete_signal_function(
+                                    cls, self.field_name, self.target_model,
+                                    self.options.get('pre_delete_function'),
+                                    self.options.get('post_delete_function'))
 
         # Weak=False because the functions will be garbage collected otherwise
         if save_signal_function:
@@ -114,5 +86,80 @@ def cascade_embedded(model, field_name, pre_save_function=None,
             signals.post_delete.connect(delete_signal_function,
                                         sender=cls, weak=False)
         return cls
-    return wrapper
+
+    def get_model(self, cls, model_str):
+        if isinstance(model_str, basestring):
+            # Get the "app.Model" from the model string
+            try:
+                app_label, model_name = model_str.split(".")
+            except ValueError:
+                # If we can't split, assume the model is in the current app
+                app_label = cls._meta.app_label
+                model_name = model_str
+            model_cls = models.get_model(app_label, model_name)
+        elif isinstance(model_str, models.Model):
+            model_cls = model_str
+        else:
+            raise TypeError("'model' must be either a model class or a "
+                            "string model relation.")
+        return model_cls
+
+    def build_save_signal_function(self, cls, field_name, model_str,
+                                   pre_save_function, post_save_function):
+        """Build the function called by the post_save signal
+
+        This will update the given field in the given model with the
+        saved data.
+        """
+        def save_signal_function(sender, instance, created, *args, **kwargs):
+            model_cls = self.get_model(cls, model_str)
+            # If this is a newly created model, there won't be an embedded
+            # field that needs to be updated
+            if created:
+                return
+
+            # Can't use 'update()' on embedded models. Besides, we need to be
+            # able to run the pre and post save functions
+            filter_args = {field_name: A('id', instance.id)}
+            for obj in model_cls.objects.filter(**filter_args):
+                if pre_save_function:
+                    pre_save_function(sender, instance, created,
+                                      embedded_instance=obj,
+                                      *args, **kwargs)
+                try:
+                    setattr(obj, field_name, instance)
+                    obj.save()
+                finally:
+                    if post_save_function:
+                        post_save_function(sender, instance, created,
+                                           embedded_instance=obj,
+                                           *args, **kwargs)
+        return save_signal_function
+
+    def build_delete_signal_function(self, cls, field_name, model_str,
+                                    pre_delete_function, post_delete_function):
+        """Build the function called by the post_delete signal
+
+        This will set the given field in the given model to 'None'
+        """
+        def delete_signal_function(sender, instance, *args, **kwargs):
+            model_cls = self.get_model(cls, model_str)
+
+            # Can't use 'update()' on embedded models. Besides, we need to be
+            # able to run the pre and post delete functions
+            filter_args = {field_name: A('id', instance.id)}
+            for obj in model_cls.objects.filter(**filter_args):
+                if pre_delete_function:
+                    pre_delete_function(sender, instance,
+                                        embedded_instance=obj,
+                                        *args, **kwargs)
+                try:
+                    setattr(obj, field_name, None)
+                    obj.save()
+                finally:
+                    if post_delete_function:
+                        post_delete_function(sender, instance,
+                                             embedded_instance=obj,
+                                             *args, **kwargs)
+        return delete_signal_function
 
