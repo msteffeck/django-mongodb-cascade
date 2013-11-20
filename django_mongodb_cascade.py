@@ -1,7 +1,30 @@
+from collections import Hashable
+import hashlib
 
 from django.db import models
 from django.db.models import signals
 from django_mongodb_engine.query import A
+
+
+WATCH_FIELDS_HASH_ATTRIBUTE = "_dmc_watch_fields_hash"
+
+
+def deep_hash(value):
+    """Iterate over a value and recurse to build a serviceable hash.
+
+    If the value is a simple hashable value, it will be hashed and returned.
+    If the value is a (standard) non-hashable object, this function will
+    attempt to build a hash.
+    """
+    if isinstance(value, Hashable):
+        return hash(value)
+    else:
+        if isinstance(value, dict):
+            return hash(tuple((k, deep_hash(v)) for k, v in value.iteritems()))
+        elif isinstance(value, (list, set, tuple)):
+            return hash(tuple(deep_hash(v) for v in value))
+        else:
+            raise TypeError("Unhashable type: '%s'" % type(value).__name__)
 
 
 class cascade_embedded(object):
@@ -56,6 +79,8 @@ class cascade_embedded(object):
         self.options = kwargs
 
     def __call__(self, cls):
+        watch_fields = self.options.get('watch_fields')
+
         # Prepare the post_save signal
         override_save_function = self.options.get('override_save_function', -1)
         if override_save_function != -1:
@@ -63,7 +88,7 @@ class cascade_embedded(object):
         else:
             save_signal_function = self.build_save_signal_function(
                                         cls, self.field_name,
-                                        self.target_model,
+                                        self.target_model, watch_fields,
                                         self.options.get('pre_save_function'),
                                         self.options.get('post_save_function'))
 
@@ -78,13 +103,19 @@ class cascade_embedded(object):
                                     self.options.get('pre_delete_function'),
                                     self.options.get('post_delete_function'))
 
-        # Weak=False because the functions will be garbage collected otherwise
+        # weak=False because the functions will be garbage collected otherwise
         if save_signal_function:
             signals.post_save.connect(save_signal_function,
                                       sender=cls, weak=False)
         if delete_signal_function:
             signals.post_delete.connect(delete_signal_function,
                                         sender=cls, weak=False)
+
+        if watch_fields:
+            init_signal_function = self.build_init_signal_function(
+                                        watch_fields)
+            signals.post_init.connect(init_signal_function,
+                                      sender=cls, weak=False)
         return cls
 
     def get_model(self, cls, model_str):
@@ -104,7 +135,32 @@ class cascade_embedded(object):
                             "string model relation.")
         return model_cls
 
-    def build_save_signal_function(self, cls, field_name, model_str,
+    def _build_watch_fields_hash(self, instance, watch_fields):
+        """Build the hash for the watch fields"""
+        # Build a hash of all of the 'watch_fields'. If the hash changes
+        # then we'll know the embedded instance needs to be updated.
+        values = [str(deep_hash(getattr(instance, field_name, None)))
+                  for field_name in watch_fields]
+
+        # Now combine all of the field hashes into an md5 hash.
+        md5 = hashlib.md5()
+        md5.update("".join(values))
+        return md5.hexdigest()
+
+    def build_init_signal_function(self, watch_fields):
+        """Build the post_init signal function.
+
+        This generates a hash of the model values immediately after the init
+        finishes, so we can keep track of what changes.
+        """
+        def init_signal_function(sender, instance, *args, **kwargs):
+            watch_fields_hash = self._build_watch_fields_hash(instance,
+                                                              watch_fields)
+            setattr(instance, WATCH_FIELDS_HASH_ATTRIBUTE, watch_fields_hash)
+        return init_signal_function
+
+    def build_save_signal_function(self, cls, field_name,
+                                   model_str, watch_fields,
                                    pre_save_function, post_save_function):
         """Build the function called by the post_save signal
 
@@ -117,6 +173,16 @@ class cascade_embedded(object):
             # field that needs to be updated
             if created:
                 return
+
+            # If the watch_fields are defined, we'll check their values with
+            # a hash. If the hash is the same, then none of them were changed.
+            if watch_fields:
+                watch_fields_hash = self._build_watch_fields_hash(instance,
+                                                                  watch_fields)
+                if watch_fields_hash == getattr(instance,
+                                                WATCH_FIELDS_HASH_ATTRIBUTE,
+                                                None):
+                    return
 
             # Can't use 'update()' on embedded models. Besides, we need to be
             # able to run the pre and post save functions
