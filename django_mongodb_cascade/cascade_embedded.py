@@ -163,6 +163,11 @@ class cascade_embedded(object):
                                                 WATCH_FIELDS_HASH_ATTRIBUTE,
                                                 None):
                     return
+                # If the hashes don't match, that means we will need to update.
+                # In that case, we need to save the new hash.
+                else:
+                    setattr(instance, WATCH_FIELDS_HASH_ATTRIBUTE,
+                            watch_fields_hash)
 
             # Can't use 'update()' on embedded models. Besides, we need to be
             # able to run the pre and post save functions
