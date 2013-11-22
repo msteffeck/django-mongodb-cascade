@@ -1,30 +1,10 @@
-from collections import Hashable
 import hashlib
 
 from django.db import models
 from django.db.models import signals
 from django_mongodb_engine.query import A
 
-
-WATCH_FIELDS_HASH_ATTRIBUTE = "_dmc_watch_fields_hash"
-
-
-def deep_hash(value):
-    """Iterate over a value and recurse to build a serviceable hash.
-
-    If the value is a simple hashable value, it will be hashed and returned.
-    If the value is a (standard) non-hashable object, this function will
-    attempt to build a hash.
-    """
-    if isinstance(value, Hashable):
-        return hash(value)
-    else:
-        if isinstance(value, dict):
-            return hash(tuple((k, deep_hash(v)) for k, v in value.iteritems()))
-        elif isinstance(value, (list, set, tuple)):
-            return hash(tuple(deep_hash(v) for v in value))
-        else:
-            raise TypeError("Unhashable type: '%s'" % type(value).__name__)
+from django_mongodb_cascade import WATCH_FIELDS_HASH_ATTRIBUTE, deep_hash
 
 
 class cascade_embedded(object):
@@ -186,14 +166,14 @@ class cascade_embedded(object):
 
             # Can't use 'update()' on embedded models. Besides, we need to be
             # able to run the pre and post save functions
-            filter_args = {field_name: A('id', instance.id)}
+            filter_args = self._get_filter_args(field_name, instance)
             for obj in model_cls.objects.filter(**filter_args):
                 if pre_save_function:
                     pre_save_function(sender, instance, created,
                                       embedded_instance=obj,
                                       *args, **kwargs)
                 try:
-                    setattr(obj, field_name, instance)
+                    self._set_embedded_attribute(obj, field_name, instance)
                     obj.save()
                 finally:
                     if post_save_function:
@@ -213,14 +193,15 @@ class cascade_embedded(object):
 
             # Can't use 'update()' on embedded models. Besides, we need to be
             # able to run the pre and post delete functions
-            filter_args = {field_name: A('id', instance.id)}
+            filter_args = self._get_filter_args(field_name, instance)
             for obj in model_cls.objects.filter(**filter_args):
                 if pre_delete_function:
                     pre_delete_function(sender, instance,
                                         embedded_instance=obj,
                                         *args, **kwargs)
                 try:
-                    setattr(obj, field_name, None)
+                    self._set_embedded_attribute(obj, field_name, instance,
+                                                 delete=True)
                     obj.save()
                 finally:
                     if post_delete_function:
@@ -228,4 +209,14 @@ class cascade_embedded(object):
                                              embedded_instance=obj,
                                              *args, **kwargs)
         return delete_signal_function
+
+    def _get_filter_args(self, field_name, instance):
+        return  {field_name: A('id', instance.id)}
+
+    def _set_embedded_attribute(self, obj, field_name, instance, delete=False):
+        if delete:
+            setattr(obj, field_name, None)
+        else:
+            setattr(obj, field_name, instance)
+
 
