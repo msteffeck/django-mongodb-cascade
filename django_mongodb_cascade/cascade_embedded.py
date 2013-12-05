@@ -175,7 +175,7 @@ class cascade_embedded(object):
             for obj in model_cls.objects.filter(**filter_args):
                 if pre_save_function:
                     pre_save_function(sender, instance, created,
-                                      embedded_instance=obj,
+                                      encompassing_instance=obj,
                                       *args, **kwargs)
                 try:
                     self._set_embedded_attribute(obj, field_name, instance)
@@ -183,7 +183,7 @@ class cascade_embedded(object):
                 finally:
                     if post_save_function:
                         post_save_function(sender, instance, created,
-                                           embedded_instance=obj,
+                                           encompassing_instance=obj,
                                            *args, **kwargs)
         return save_signal_function
 
@@ -202,7 +202,7 @@ class cascade_embedded(object):
             for obj in model_cls.objects.filter(**filter_args):
                 if pre_delete_function:
                     pre_delete_function(sender, instance,
-                                        embedded_instance=obj,
+                                        encompassing_instance=obj,
                                         *args, **kwargs)
                 try:
                     self._set_embedded_attribute(obj, field_name, instance,
@@ -211,7 +211,7 @@ class cascade_embedded(object):
                 finally:
                     if post_delete_function:
                         post_delete_function(sender, instance,
-                                             embedded_instance=obj,
+                                             encompassing_instance=obj,
                                              *args, **kwargs)
         return delete_signal_function
 
