@@ -55,7 +55,8 @@ class cascade_embedded(object):
     """
     def __init__(self, target_model, field_name, **kwargs):
         self.target_model = target_model
-        self.field_name = field_name
+        # Break the field into its components. E.g. a.b.c -> ['a', 'b', 'c']
+        self.field_name = field_name.split(".")
         self.options = kwargs
 
     def __call__(self, cls):
@@ -216,12 +217,32 @@ class cascade_embedded(object):
         return delete_signal_function
 
     def _get_filter_args(self, field_name, instance):
-        return  {field_name: A('id', instance.id)}
+        # Build the field from its components and append 'id'
+        # E.g. ['a', 'b', 'c'] -> 'a', A('b.c.id', <instance.id>)
+        return  {field_name[0]:
+                     A(".".join(field_name[1:] + ["id"]), instance.id)}
+
+    def _get_nested_field_obj(self, obj, field_name):
+        """Find the object that contains the embedded model field.
+         E.g. a.b.c: 'c' is the embedded model field, so 'b' contains it. This
+                method will return 'b'
+        """
+        for f in field_name[:-1]:
+            obj = getattr(obj, f)
+        return obj
 
     def _set_embedded_attribute(self, obj, field_name, instance, delete=False):
+        """Set the embedded model field to the appropriate value
+
+        :param obj: The model instance containing the EMF
+        :param field_name: A list containing the components of the field name
+        :param instance: The embedded model instance
+        :param delete: Boolean flag for whether or not this is a delete
+                     operation.
+        """
         if delete:
-            setattr(obj, field_name, None)
+            value = None
         else:
-            setattr(obj, field_name, instance)
-
-
+            value = instance
+        obj = self._get_nested_field_obj(obj, field_name)
+        setattr(obj, field_name[-1], value)

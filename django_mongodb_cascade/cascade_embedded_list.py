@@ -10,7 +10,8 @@ class cascade_embedded_list(cascade_embedded):
     """
     def _set_embedded_attribute(self, obj, field_name, instance, delete=False):
         """Find the 'instance' inside the obj.field_name and update it."""
-        field = getattr(obj, field_name)
+        obj = self._get_nested_field_obj(obj, field_name)
+        field = getattr(obj, field_name[-1])
         # Iterate over the field and find the instance.
         for item in field:
             if item.pk == instance.pk:
