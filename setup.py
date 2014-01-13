@@ -2,7 +2,7 @@ from setuptools import setup
 
 setup(
     name='django-mongodb-cascade',
-    version='0.0.3',
+    version='0.1.0',
     author='Michael Steffeck/Merchant Atlas Inc.',
     author_email="msteffeck@merchantatlas.com",
     url='https://github.com/MerchantAtlas/django-mongodb-cascade',
