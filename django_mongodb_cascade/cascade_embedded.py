@@ -46,8 +46,6 @@ class cascade_embedded(object):
             by providing a function here.
             The user can also provide the value "None". In that case, no
             post_delete signal will be attached at all.
-
-    # TODO: Add support
     :param watch_fields: A list of fields in the embedded model to watch
             for changes. If this field is defined, the target model will only
             be updated when one of the listed fields are changed. This only
