@@ -4,9 +4,9 @@
 Cascade saves and deletes to models that are embedding the saved/deleted model instance. This is meant for django-nonrel, and it may only work with Merchant Atlas' edited version of [mongodb-engine](https://github.com/MerchantAtlas/mongodb-engine) (I haven't used this with the original). 
 
 
-When one model is embedded in another, it will not be updated if the instance of the embedded model is changed. This class decorator incorporates `post_init`, `post_save` and `post_delete` signals into the decorated model. 
+Typically, when one model is embedded in another, it will not be updated if the instance of the embedded model is changed. This class decorator incorporates `post_init`, `post_save` and `post_delete` signals into the decorated model, to ensure changes to its instances are reflected in the models that are embedding them. 
 
-Since this library uses django signals to manage the embedded-model updates, circumventing the normal Django saving process
+Since this library uses django signals to manage the embedded-model updates, circumventing the normal Django saving process will render this ineffective. 
 
 ####Example:
 ```python
