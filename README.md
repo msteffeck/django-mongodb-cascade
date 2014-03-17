@@ -1,12 +1,12 @@
 #django_mongodb_cascade
 ======================
 
-Cascade saves and deletes to models that are embedding the saved/deleted model instance
+Cascade saves and deletes to models that are embedding the saved/deleted model instance. This is meant for django-nonrel, and Mongodb.
 
 
-When one model is embedded in another, it will not be updated if the
-instance of the embedded model is changed. This class decorator
-incorporates `post_save` and `post_delete` signals into the decorated model.
+When one model is embedded in another, it will not be updated if the instance of the embedded model is changed. This class decorator incorporates `post_init`, `post_save` and `post_delete` signals into the decorated model. 
+
+Since this library uses django signals to manage the embedded-model updates, circumventing the normal Django saving process
 
 ####Example:
 ```python
