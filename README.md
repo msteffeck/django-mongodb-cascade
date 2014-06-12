@@ -12,6 +12,21 @@ Since this library uses django signals to manage the embedded-model updates, cir
 ```python
 @cascade_embedded("account.Organization", "user_profile")
 class UserProfile(models.Model)
+    name = models.CharField(max_length=255)
+
+# Update a user profile from an organization
+org = Organization.objects.all()[0]
+up = org.user_profile
+print up.name
+George
+
+up.name = "Bob"
+up.save()
+
+# Requery the organization to see the changes in the embedded model.
+org = Organization.objects.get(id=org.id)
+print org.up.name
+Bob
 ```
 
 ###Required Arguments:
