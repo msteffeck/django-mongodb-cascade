@@ -10,6 +10,10 @@ Since this library uses django signals to manage the embedded-model updates, cir
 
 ####Example:
 ```python
+class Organization(models.Model):
+    user_profile = djangotoolbox.fields.EmbeddedModelField("account.UserProfile")
+
+
 @cascade_embedded("account.Organization", "user_profile")
 class UserProfile(models.Model)
     name = models.CharField(max_length=255)
